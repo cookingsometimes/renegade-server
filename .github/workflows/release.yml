@@ -1,0 +1,29 @@
+name: Release RenegadeServer
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish
+        run: dotnet publish RenegadeServer.csproj -c Release --self-contained -r win-x64 -p:PublishSingleFile=true -o publish
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: publish/RenegadeServer.exe
+          generate_release_notes: true
