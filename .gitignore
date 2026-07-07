@@ -5,3 +5,4 @@ data/
 .env
 publish/
 .agents
+release.ps1
