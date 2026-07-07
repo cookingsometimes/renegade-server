@@ -1,6 +1,7 @@
 using System.Net;
 using RenegadeServer.Logging;
 using RenegadeServer.Network;
+using RenegadeServer.Velocity;
 using RenegadeServer.Xeno;
 
 var port = 3420;
@@ -8,6 +9,7 @@ string? dataDir = null;
 string? xenoDir = null;
 string? versionsDir = null;
 string? logDir = null;
+string? velocityDir = null;
 bool cleanOld = false;
 
 for (int i = 0; i < args.Length; i++)
@@ -18,6 +20,7 @@ for (int i = 0; i < args.Length; i++)
     else if (a == "--xeno-dir" && i + 1 < args.Length) xenoDir = args[++i];
     else if (a == "--versions-dir" && i + 1 < args.Length) versionsDir = args[++i];
     else if (a == "--log-dir" && i + 1 < args.Length) logDir = args[++i];
+    else if (a == "--velocity-dir" && i + 1 < args.Length) velocityDir = args[++i];
     else if (a == "--clean") cleanOld = true;
     else if (a == "--help" || a == "-h")
     {
@@ -26,13 +29,14 @@ for (int i = 0; i < args.Length; i++)
         Console.WriteLine("Usage: RenegadeServer.exe [options]");
         Console.WriteLine("");
         Console.WriteLine("Options:");
-        Console.WriteLine("  --port <port>          HTTP port (default: 3420)");
-        Console.WriteLine("  --data-dir <path>      Base data directory (default: %APPDATA%/renegade)");
-        Console.WriteLine("  --xeno-dir <path>      Directory containing Xeno.dll (default: {data-dir}/xeno)");
-        Console.WriteLine("  --versions-dir <path>  Directory for downloaded versions (default: {data-dir}/xeno-versions)");
-        Console.WriteLine("  --log-dir <path>       Directory for log files (default: {data-dir}/logs)");
-        Console.WriteLine("  --clean                Remove old Xeno versions on startup");
-        Console.WriteLine("  --help, -h             Show this help");
+        Console.WriteLine("  --port <port>              HTTP port (default: 3420)");
+        Console.WriteLine("  --data-dir <path>          Base data directory (default: %APPDATA%/renegade)");
+        Console.WriteLine("  --xeno-dir <path>          Directory containing Xeno.dll (default: {data-dir}/xeno)");
+        Console.WriteLine("  --versions-dir <path>      Directory for downloaded versions (default: {data-dir}/xeno-versions)");
+        Console.WriteLine("  --log-dir <path>           Directory for log files (default: {data-dir}/logs)");
+        Console.WriteLine("  --velocity-dir <path>      Directory containing VelocityApi.dll (default: {data-dir}/velocity)");
+        Console.WriteLine("  --clean                    Remove old Xeno versions on startup");
+        Console.WriteLine("  --help, -h                 Show this help");
         return;
     }
 }
@@ -42,14 +46,17 @@ dataDir ??= defaultDataDir;
 versionsDir ??= Path.Combine(dataDir, "xeno-versions");
 xenoDir ??= Path.Combine(dataDir, "xeno");
 logDir ??= Path.Combine(dataDir, "logs");
+velocityDir ??= Path.Combine(dataDir, "velocity");
 
 Directory.CreateDirectory(dataDir);
 Directory.CreateDirectory(versionsDir);
 Directory.CreateDirectory(xenoDir);
 Directory.CreateDirectory(logDir);
+Directory.CreateDirectory(velocityDir);
 
 var logService = new Service(logDir);
 var orchestrator = new Orchestrator(logService, xenoDir, versionsDir);
+var velocityOrch = new VelocityOrchestrator(logService, velocityDir);
 
 if (cleanOld) orchestrator.CleanupOldVersions();
 
@@ -67,8 +74,23 @@ else
     logService.Log("info", "Server", "Xeno not found. Download it from the Renegade app.");
 }
 
-var wsHandler = new WebSocketHandler(logService, orchestrator);
-var router = new HttpRouter(orchestrator, logService, wsHandler, port);
+if (velocityOrch.IsAvailable())
+{
+    try
+    {
+        velocityOrch.LoadDll();
+        velocityOrch.StartCommunication();
+        logService.Log("info", "Server", $"Velocity version: {velocityOrch.GetVersion()}");
+    }
+    catch (Exception ex) { logService.Log("error", "Server", $"Velocity init failed: {ex.Message}"); }
+}
+else
+{
+    logService.Log("info", "Server", "Velocity not found. Place VelocityApi.dll in the velocity directory.");
+}
+
+var wsHandler = new WebSocketHandler(logService, orchestrator, velocityOrch);
+var router = new HttpRouter(orchestrator, velocityOrch, logService, wsHandler, port);
 
 var listener = new HttpListener();
 listener.Prefixes.Add($"http://127.0.0.1:{port}/");

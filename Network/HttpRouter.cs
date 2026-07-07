@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using RenegadeServer.Logging;
+using RenegadeServer.Velocity;
 using RenegadeServer.Xeno;
 
 namespace RenegadeServer.Network;
@@ -9,13 +10,15 @@ namespace RenegadeServer.Network;
 public class HttpRouter
 {
     private readonly Orchestrator _orch;
+    private readonly VelocityOrchestrator _velOrch;
     private readonly Service _log;
     private readonly WebSocketHandler _ws;
     private readonly int _port;
 
-    public HttpRouter(Orchestrator orch, Service log, WebSocketHandler ws, int port)
+    public HttpRouter(Orchestrator orch, VelocityOrchestrator velOrch, Service log, WebSocketHandler ws, int port)
     {
         _orch = orch;
+        _velOrch = velOrch;
         _log = log;
         _ws = ws;
         _port = port;
@@ -150,7 +153,70 @@ public class HttpRouter
                     version = _orch.GetVersion(),
                     dllLoaded = _orch.IsInitialized(),
                     downloaded = _orch.IsDownloaded(),
+                    velocityDir = _velOrch.GetVelocityDir(),
+                    velocityAvailable = _velOrch.IsAvailable(),
                 });
+            }
+            else if (path == "/velocity/version" && method == "GET")
+            {
+                respText = Json(new { version = _velOrch.GetVersion() });
+            }
+            else if (path == "/velocity/status" && method == "GET")
+            {
+                respText = Json(_velOrch.GetStatus());
+            }
+            else if (path == "/velocity/pids" && method == "GET")
+            {
+                respText = Json(new { pids = _velOrch.GetInjectedPids() });
+            }
+            else if (path == "/velocity/start" && method == "POST")
+            {
+                try
+                {
+                    if (!_velOrch.IsInitialized()) _velOrch.LoadDll();
+                    _velOrch.StartCommunication();
+                    respText = Json(new { success = true });
+                }
+                catch (Exception ex)
+                {
+                    respText = Json(new { success = false, error = ex.Message });
+                    status = 500;
+                }
+            }
+            else if (path == "/velocity/stop" && method == "POST")
+            {
+                _velOrch.Stop();
+                respText = Json(new { success = true });
+            }
+            else if (path == "/velocity/attach" && method == "POST")
+            {
+                var doc = JsonDocument.Parse(body);
+                var pid = doc.RootElement.TryGetProperty("pid", out var p) ? p.GetInt32() : 0;
+                if (pid == 0)
+                {
+                    respText = Json(new { error = "pid is required" });
+                    status = 400;
+                }
+                else
+                {
+                    var result = await _velOrch.Attach(pid);
+                    respText = Json(new { success = true, status = result });
+                }
+            }
+            else if (path == "/velocity/execute" && method == "POST")
+            {
+                var doc = JsonDocument.Parse(body);
+                var script = doc.RootElement.TryGetProperty("script", out var s) ? s.GetString() ?? "" : "";
+                if (string.IsNullOrEmpty(script))
+                {
+                    respText = Json(new { error = "script is required" });
+                    status = 400;
+                }
+                else
+                {
+                    var result = _velOrch.Execute(script);
+                    respText = Json(new { success = true, status = result });
+                }
             }
             else
             {

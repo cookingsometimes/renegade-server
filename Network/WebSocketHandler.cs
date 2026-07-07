@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using RenegadeServer.Logging;
+using RenegadeServer.Velocity;
 using RenegadeServer.Xeno;
 
 namespace RenegadeServer.Network;
@@ -11,6 +12,7 @@ public class WebSocketHandler
 {
     private readonly Service _log;
     private readonly Orchestrator _orch;
+    private readonly VelocityOrchestrator _velOrch;
     private readonly List<(WebSocket ws, HashSet<string> channels, CancellationTokenSource cts)> _clients = new();
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -18,12 +20,19 @@ public class WebSocketHandler
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    public WebSocketHandler(Service log, Orchestrator orch)
+    public WebSocketHandler(Service log, Orchestrator orch, VelocityOrchestrator velOrch)
     {
         _log = log;
         _orch = orch;
+        _velOrch = velOrch;
 
         _orch.SubscribeToEvents((type, data) =>
+        {
+            var msg = JsonSerializer.Serialize(new { type, data }, _jsonOptions);
+            Broadcast(type, msg);
+        });
+
+        _velOrch.SubscribeToEvents((type, data) =>
         {
             var msg = JsonSerializer.Serialize(new { type, data }, _jsonOptions);
             Broadcast(type, msg);
